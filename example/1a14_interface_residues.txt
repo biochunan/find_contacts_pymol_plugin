@@ -1,0 +1,47 @@
+Interface residues:
+Chain: N
+Type: Protein
+Context: (N, HL)
+Interface: 20  residues
+Sequence :    1  RDFNNLTKGL CTINSWHIYG KDNAVRIGED SDVLVTREPY VSCDPDECRF  51  
+Interface:    1  ---------- ---------- ---------- ---------- ----------  51  
+Sequence :   51  YALSQGTTIR GKHSNGTIHD RSQYRALISW PLSSPPTVYN SRVECIGWSS  101 
+Interface:   51  ---------- ---------- ---------- ---------- ----------  101 
+Sequence :  101  TSCHDGKTRM SICISGPNNN ASAVIWYNRR PVTEINTWAR NILRTQESEC  151 
+Interface:  101  ---------- ---------- ---------- ---------- ----------  151 
+Sequence :  151  VCHNGVCPVV FTDGSATGPA ETRIYYFKEG KILKWEPLAG TAKHIEECSC  201 
+Interface:  151  ---------- ---------- ---------- ---------- ----------  201 
+Sequence :  201  YGERAEITCT CRDNWQGSNR PVIRIDPVAM THTSQYICSP VLTDNPRPND  251 
+Interface:  201  ---------- ---------- ---------- ---------- -------***  251 
+Sequence :  251  PTVGKCNDPY PGNNNNGVKG FSYLDGVNTW LGRTISIASR SGYEMLKVPN  301 
+Interface:  251  **-------* ***------- ---------- ----*****- *---------  301 
+Sequence :  301  ALTDDKSKPT QGQTIVLNTD WSGYSGSFMD YWAEGECYRA CFYVELIRGR  351 
+Interface:  301  ---------- -------*** *--------- ---------- ----------  351 
+Sequence :  351  PKEDKVWWTS NSIVSMCSST EFLGQWDWPD GAKIEYFL  388 
+Interface:  351  -*-------- ---------- ---------- --------  388 
+
+
+Chain: H
+Type: Protein
+Context: (H, N)
+Interface: 8   residues
+Sequence :    1  QVQLQQSGAE LVKPGASVRM SCKASGYTFT NYNMYWVKQS PGQGLEWIGI  51  
+Interface:    1  ---------- ---------- ---------- ---------- ----------  51  
+Sequence :   51  FYPGNGDTSY NQKFKDKATL TADKSSNTAY MQLSSLTSED SAVYYCARSG  101 
+Interface:   51  -*--*-***- ---------- ---------- ---------- ----------  101 
+Sequence :  101  GSYRYDGGFD YWGQGTTVTV  120 
+Interface:  101  --*-**---- ----------  120 
+
+
+Chain: L
+Type: Protein
+Context: (L, N)
+Interface: 6   residues
+Sequence :    1  DIELTQTTSS LSASLGDRVT ISCRASQDIS NYLNWYQQNP DGTVKLLIYY  51  
+Interface:    1  ---------- ---------- ---------* -*-------- ----------  51  
+Sequence :   51  TSNLHSEVPS RFSGSGSGTD YSLTISNLEQ EDIATYFCQQ DFTLPFTFGG  101 
+Interface:   51  ---------- ---------- ---------- ---------- ****------  101 
+Sequence :  101  GTAA  104 
+Interface:  101  ----  104 
+
+
