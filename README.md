@@ -4,7 +4,10 @@ This script is used to visualize chain contacts in PyMOL.
 
 ## Example
 
-![example](./figures/find-contacts-pymol-loop.gif)
+<a href=https://www.rcsb.org/structure/1A14 alt="link to 1a14 rcsb pdb page">
+  <img src="./figures/find-contacts-pymol-loop.gif" width="500" alt="example">
+  </img>
+</a>
 
 ## Dependnecies
 
