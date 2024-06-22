@@ -5,6 +5,7 @@ Reference:
 """
 
 # basic
+import copy
 import math
 import shutil
 import tempfile
@@ -20,6 +21,134 @@ from Bio.PDB import PDBIO, MMCIFParser
 from biopandas.pdb import PandasPdb
 from pymol import cmd
 
+# ----------------------------------------
+# Atom Names
+# ----------------------------------------
+# For RNA nucleotides (A, C, G, U):
+RNA_RES_NAMES = ["A", "C", "G", "U"]
+DNA_RES_NAMES = ["DA", "DC", "DG", "DT"]
+# nucleotide base atoms
+BASE_ATOM_NAMES = {
+    "A": [
+        "N1",
+        "C2",
+        "N3",
+        "C4",
+        "C5",
+        "C6",  # adenine ring
+        "N6",  # amino group off the C6 ring
+        "N7",
+        "C8",
+        "N9",  # additional ring
+    ],
+    "G": [
+        "N1",
+        "C2",
+        "N2",
+        "N3",
+        "C4",
+        "C5",
+        "C6",  # guanine ring
+        "O6",  # oxygen atom on the C6 carbon
+        "N7",
+        "C8",
+        "N9",  # additional ring
+    ],
+    "C": [
+        "N1",
+        "C2",
+        "O2",
+        "N3",
+        "C4",
+        "C5",
+        "C6",  # cytosine ring
+    ],
+    "T": [
+        "N1",
+        "C2",
+        "O2",
+        "N3",
+        "C4",
+        "O4",
+        "C5",
+        "C6",  # similar to cytosine, but with an additional methyl group
+    ],
+    "U": [
+        "N1",
+        "C2",
+        "O2",
+        "N3",
+        "C4",
+        "O4",
+        "C5",
+        "C6",  # Similar to thymine but without the methyl group.
+    ],
+}
+# backbone atoms
+DNA_ATOM_BD_NAMES = [
+    # Phosphate group
+    "P",
+    "OP1",
+    "OP2",
+    "OP3",
+    # Sugar group
+    "C1'",
+    "C2'",
+    "C3'",
+    "C4'",
+    "C5'",  # sugar carbon
+    # oxygen in the sugar
+    "O3'",  # O3' connects to the next nucleotide's phosphate group
+    "O4'",
+    "O5'",  # O5' connects the sugar to the phosphate group
+    # hydrogen atoms connect to the sugar
+    "H1'",
+    "H2'",
+    "H2''",
+    "H3'",
+    "H4'",
+    "H5'",
+    "H5''",
+]
+RNA_ATOM_BD_NAMES = copy.deepcopy(DNA_ATOM_BD_NAMES) + ["O2'"]
+# The key difference is DNA lacks the O2' atom on the sugar
+ADENOSINE_ATOM_NAMES = copy.deepcopy(BASE_ATOM_NAMES["A"]) + copy.deepcopy(
+    RNA_ATOM_BD_NAMES
+)
+GUANOSINE_ATOM_NAMES = copy.deepcopy(BASE_ATOM_NAMES["G"]) + copy.deepcopy(
+    RNA_ATOM_BD_NAMES
+)
+CYTIDINE_ATOM_NAMES = copy.deepcopy(BASE_ATOM_NAMES["C"]) + copy.deepcopy(
+    RNA_ATOM_BD_NAMES
+)
+THYMIDINE_ATOM_NAMES = copy.deepcopy(BASE_ATOM_NAMES["T"]) + copy.deepcopy(
+    DNA_ATOM_BD_NAMES
+)
+URIDINE_ATOM_NAMES = copy.deepcopy(BASE_ATOM_NAMES["U"]) + copy.deepcopy(
+    RNA_ATOM_BD_NAMES
+)
+# dna and rna all atom names
+DNA_ATOM_NAMES = set(
+    ADENOSINE_ATOM_NAMES
+    + GUANOSINE_ATOM_NAMES
+    + CYTIDINE_ATOM_NAMES
+    + THYMIDINE_ATOM_NAMES
+)
+RNA_ATOM_NAMES = set(
+    ADENOSINE_ATOM_NAMES
+    + GUANOSINE_ATOM_NAMES
+    + CYTIDINE_ATOM_NAMES
+    + URIDINE_ATOM_NAMES
+)
+
+LOG_LEVELS = {
+    "DEBUG": 10,
+    "INFO": 20,
+    "WARNING": 30,
+    "ERROR": 40,
+    "CRITICAL": 50,
+}
+MIN_LOG_LEVEL = "INFO"
 
 # ----------------------------------------
 # General utils
@@ -29,12 +158,13 @@ def timestamp() -> str:
     return time.strftime("%Y%b%d-%H%M%S", time.localtime())
 
 
-def print_msg(msg: str, level: str = "INFO") -> None:
+def print_msg(msg: str, level: str = "INFO", min_level: str = MIN_LOG_LEVEL):
     level = level.upper()
     assert level in ["INFO", "ERROR", "WARNING", "DEBUG"]
-    if level == "INFO":
-        level = "INFO "
-    print(f"{level} {timestamp()}: {msg}")
+    if LOG_LEVELS[level] >= LOG_LEVELS[min_level]:
+        if level == "INFO":
+            level = "INFO "
+        print(f"{level} {timestamp()}: {msg}")
 
 
 def deduplicate_res_pairs(res_pairs: List[Tuple[str, str]]) -> List[Tuple[str, str]]:
@@ -98,8 +228,7 @@ def timing_context(label: str = "Block") -> Generator[None, Any, None]:
     finally:
         end_time = time.time()
         mins, secs = divmod(end_time - start_time, 60)
-        print_msg(f"{label} ended.", "INFO")
-        print_msg(f"Total execution time for {label}: {mins:.0f}m {secs:.2f}s", "INFO")
+        print_msg(f"{label} ended. Execution time: {mins:.0f}m {secs:.2f}s", "INFO")
 
 
 def three_to_one(aa_code: str) -> str:
@@ -277,33 +406,28 @@ def to_csv(
         "chain_2": [],
         "interaction": [],
     }
-    for i, row in contacts_df.iterrows():
-        chain_label_1, res_name_1, res_num_1, insert_1, atom_name_1 = row[
-            "atom_1"
-        ].split(":")
-        chain_label_2, res_name_2, res_num_2, insert_2, atom_name_2 = row[
-            "atom_2"
-        ].split(":")
-        # join the residue number and insertion
-        res_lab_1 = "".join([res_num_1, insert_1])
-        res_lab_2 = "".join([res_num_2, insert_2])
+    for _, row in contacts_df.iterrows():
+        c1, r1, ri1, ins1 = row["residue_1"].split(":")
+        c2, r2, ri2, ins2 = row["residue_2"].split(":")
 
         # map the interaction type
+        # Choices: "HBond", "Polar", "Contact"
+        # NOTE: in future, need to handle multiple interaction types, use comma may be difficult for frontend to filter
         it_str = ",".join(
             itfd.get(
                 (
-                    f"{chain_label_1}:{res_name_1}:{res_num_1}:{insert_1}",
-                    f"{chain_label_2}:{res_name_2}:{res_num_2}:{insert_2}",
+                    f"{c1}:{r1}:{ri1}:{ins1}",
+                    f"{c2}:{r2}:{ri2}:{ins2}",
                 ),
                 ["Contact"],
             )
-        )  # NOTE: in future, need to handle multiple interaction types, use comma is not difficult for frontend to filter
+        )
 
         # add to the output
-        out["residue_1"].append(f"{chain_label_1}:{res_name_1}:{res_num_1}:{insert_1}")
-        out["residue_2"].append(f"{chain_label_2}:{res_name_2}:{res_num_2}:{insert_2}")
-        out["chain_1"].append(chain_label_1)
-        out["chain_2"].append(chain_label_2)
+        out["residue_1"].append(f"{c1}:{r1}:{ri1}:{ins1}")
+        out["residue_2"].append(f"{c2}:{r2}:{ri2}:{ins2}")
+        out["chain_1"].append(c1)
+        out["chain_2"].append(c2)
         out["distance"].append(round(row["distance"], 2))
         out["interaction"].append(it_str)
 
@@ -424,8 +548,8 @@ def calculate_min_residue_distances(
         chain_label_2 (str): The label of the second chain.
 
     Returns:
-        pd.DataFrame: A DataFrame with the minimum distances between each pair
-        of residues from the two chains.
+        pd.DataFrame: A DataFrame with the minimum atom-pair distances between
+            each pair of residues from the two chains.
     """
     # if node_id is not present, add it
     if "node_id" not in atom_df.columns:
@@ -474,13 +598,9 @@ def calculate_min_residue_distances(
         .reset_index(drop=True)
     )
 
-    # inlcude only the pair with the minimum distance
-    # 1. add columns id_1, id_2 by remove the last two elements from atom_1, atom_2 e.g. H:ASN:54::CB -> H:ASN:54: (DO NOT remove the last colon, it is for insertion)
-    # 2. group by id_1, id_2, and get the minimum distance
-    res_pairs["id_1"] = res_pairs["residue_1"].str.replace(r":\w+$", "", regex=True)
-    res_pairs["id_2"] = res_pairs["residue_2"].str.replace(r":[\w\']+$", "", regex=True)
-    res_pairs = res_pairs.groupby(["id_1", "id_2"]).min().reset_index()
-    res_pairs.drop(columns=["id_1", "id_2"], inplace=True)
+    # include only the pair with the minimum distance
+    res_pairs = res_pairs.groupby(["residue_1", "residue_2"]).min().reset_index()
+    res_pairs.drop(columns=["atom_1", "atom_2"], inplace=True)
 
     return res_pairs
 
@@ -630,7 +750,7 @@ def remove_intra_chain_interactions(id_pairs: List[Tuple[str, str]]):
     )
 
 
-def itf_atom_to_resis(itf_df: pd.DataFrame, interacting_atoms: np.ndarray):
+def itf_atom_to_res(itf_df: pd.DataFrame, interacting_atoms: np.ndarray):
     interacting_atom_pairs = [
         (
             itf_df.iloc[i].node_id,
@@ -652,21 +772,25 @@ def itf_atom_to_resis(itf_df: pd.DataFrame, interacting_atoms: np.ndarray):
 
 
 def get_atomic_interaction_core(
-    atom_df: pd.DataFrame, atom_name_set: List[str], dist_thr: float
+    atom_df: pd.DataFrame,
+    by_column: str,
+    list_of_values: List[Any],
+    dist_thr: float = 4.5
 ):
     """adapted from graphein.protein.edges.distance.add_hbond_interaction"""
     itf_df = filter_dataframe(
         dataframe=atom_df,
-        by_column="atom_name",
-        list_of_values=atom_name_set,
+        by_column=by_column,
+        list_of_values=list_of_values,
         boolean=True,
     )
     if len(itf_df.index) > 0:
-        distmat = compute_distmat(itf_df)
+        with timing_context("Computing distance matrix"):
+            distmat = compute_distmat(itf_df)
         interacting_atoms = get_interacting_atoms(angstroms=dist_thr, distmat=distmat)
 
-        # convert to interacting resis
-        interacting_atom_pairs, interacting_res_pairs = itf_atom_to_resis(
+        # convert to interacting residue ids
+        interacting_atom_pairs, interacting_res_pairs = itf_atom_to_res(
             itf_df, interacting_atoms
         )
 
@@ -685,11 +809,47 @@ def get_atomic_interaction_core(
     return {"inter-chain-res-pairs": [], "inter-chain-atom-pairs": []}
 
 
+def fix_chain_order(
+    payload: List[Tuple[str, str]],
+    chain_label_1: str,
+    chain_label_2: str,
+):
+    """
+    Check and fix the order of the chain labels in the residue pairs.
+    Payload is a list of dictionary with keys as residue pairs.
+    Example, payload = [{"A:ASN:21:": xxx}, {"I:G:257:": xxx}]
+    if chain_label_1 = "I", chain_label_2 = "A"
+    then the order of the keys should be reversed.
+
+    Args:
+        payload (List[Dict[Tuple[str, str], Any]]): A list of dictionaries in which the keys are a tuple of residue identifiers.
+            The key format e.g. ("A:ASN:21:", "I:G:257:")
+            where A is the first chain label, I is the second chain label
+        chain_label_1 (str): chain label 1.
+        chain_label_2 (str): chain label 2.
+    """
+    # NOTE: the changes made are in-place
+    for i, t in enumerate(payload):
+        # i => 0 to len(payload) - 1
+        # t => e.g. ('A:ASN:21:', 'I:G:257:') or ('A:ASN:21::0D1', "I:G:257::O5'")
+        c1, c2 = t[0][0], t[1][0]
+        if c1 == chain_label_1 and c2 == chain_label_2:
+            continue
+        elif c1 == chain_label_2 and c2 == chain_label_1:
+            payload[i] = (t[1], t[0])
+        else:
+            raise ValueError(
+                f"Provided chain labels {chain_label_1, chain_label_2} were not found in the residue pair {t}"
+            )
+
+
 def get_hydrogen_bonds(
     atom_df: pd.DataFrame,
+    chain_label_1: str,
+    chain_label_2: str,
 ) -> Dict[str, List[Tuple[str, str]]]:
-    DIST_THR = {"common": 3.5, "sulphur": 4.0}
-    HBOND_ATOMS = [
+    dist_thr = {"common": 3.5, "sulphur": 4.0}
+    hbond_atoms = [
         # Protein specific atoms
         "ND",  # histidine and asparagine
         "NE",  # glutamate, tryptophan, arginine, histidine
@@ -721,15 +881,24 @@ def get_hydrogen_bonds(
     ]
 
     hbond_dict_common = get_atomic_interaction_core(
-        atom_df=atom_df, atom_name_set=HBOND_ATOMS, dist_thr=DIST_THR["common"]
+        atom_df=atom_df,
+        by_column="atom_name",
+        list_of_values=hbond_atoms,
+        dist_thr=dist_thr["common"],
     )
     hbond_dict_sulphur = get_atomic_interaction_core(
-        atom_df, atom_name_set=["SD", "SG"], dist_thr=DIST_THR["sulphur"]
+        atom_df=atom_df,
+        by_column="atom_name",
+        list_of_values=["SD", "SG"],
+        dist_thr=dist_thr["sulphur"],
     )
     # merge the two dict
     hbond_dict = {}
     for k in ["inter-chain-res-pairs", "inter-chain-atom-pairs"]:
         hbond_dict[k] = hbond_dict_common[k] + hbond_dict_sulphur[k]
+
+    # [x] FIXME: add arg to force the order of the keys
+    # e.g. key ('A:ASN:21:', 'I:G:257:') should be ('I:G:257:', 'A:ASN:21:') corresponding to chain_label_1='I', chain_label_2='A'
     # deduplicate: e.g. (A:ASN:54, B:TRP:403) and (B:TRP:403, A:ASN:54) are the same
     hbond_dict["inter-chain-res-pairs"] = deduplicate_res_pairs(
         hbond_dict["inter-chain-res-pairs"]
@@ -737,6 +906,19 @@ def get_hydrogen_bonds(
     hbond_dict["inter-chain-atom-pairs"] = deduplicate_res_pairs(
         hbond_dict["inter-chain-atom-pairs"]
     )
+
+    # fix chain order in keys
+    fix_chain_order(
+        payload=hbond_dict["inter-chain-res-pairs"],
+        chain_label_1=chain_label_1,
+        chain_label_2=chain_label_2
+    )
+    fix_chain_order(
+        payload=hbond_dict["inter-chain-atom-pairs"],
+        chain_label_1=chain_label_1,
+        chain_label_2=chain_label_2
+    )
+
     return hbond_dict
 
 
@@ -758,8 +940,8 @@ def get_ionic_interactions(
     # NEG_AA: List[str] = ["GLU", "ASP", "A", "C", "G", "U"]
     # """Negatively charged amino acids and RNA bases."""
 
-    DIST_THR = 6.0
-    IONIC_ATOMS = [
+    dist_thr = 6.0
+    ionic_atoms = [
         # Protein specific atoms
         "N",
         "O",
@@ -794,7 +976,10 @@ def get_ionic_interactions(
 
     # Get ionic interactions
     ionic_dict = get_atomic_interaction_core(
-        atom_df=atom_df, atom_name_set=IONIC_ATOMS, dist_thr=DIST_THR
+        atom_df=atom_df,
+        by_column="atom_name",
+        list_of_values=ionic_atoms,
+        dist_thr=dist_thr,
     )
 
     # deduplicate: e.g. (A:ASN:54, B:TRP:403) and (B:TRP:403, A:ASN:54) are the same
@@ -811,6 +996,51 @@ def get_ionic_interactions(
 # atom_df = parse_pdb_file_as_atom_df("example/4xln.pdb")
 # l = get_ionic_interactions(atom_df)
 # l['inter-chain-atom-pairs']
+
+
+def get_polar_contacts(
+    atom_df: pd.DataFrame,
+    chain_label_1: str,
+    chain_label_2: str,
+):
+    """
+    adapted from graphein.protein.edges.distance.add_ionic_interaction
+
+    NOTE: this function only detects positively and negatively charged residues, and not all ionic interactions e.g. ionic interaction with backbone atoms
+
+    """
+    dist_thr = 3.6
+    elements = ["N", "O", "S"]
+    # Get ionic interactions
+    ct_dict = get_atomic_interaction_core(
+        atom_df=atom_df,
+        by_column="element_symbol",
+        list_of_values=elements,
+        dist_thr=dist_thr,
+    )
+
+    # deduplicate: e.g. (A:ASN:54, B:TRP:403) and (B:TRP:403, A:ASN:54) are the same
+    ct_dict["inter-chain-res-pairs"] = deduplicate_res_pairs(
+        ct_dict["inter-chain-res-pairs"]
+    )
+    ct_dict["inter-chain-atom-pairs"] = deduplicate_res_pairs(
+        ct_dict["inter-chain-atom-pairs"]
+    )
+
+    # fix chain order in keys
+    fix_chain_order(
+        payload=ct_dict["inter-chain-res-pairs"],
+        chain_label_1=chain_label_1,
+        chain_label_2=chain_label_2
+    )
+    fix_chain_order(
+        payload=ct_dict["inter-chain-atom-pairs"],
+        chain_label_1=chain_label_1,
+        chain_label_2=chain_label_2
+    )
+
+    return ct_dict
+
 
 def find_contacts_between_two_chains(
     atom_df: pd.DataFrame,
@@ -831,29 +1061,51 @@ def find_contacts_between_two_chains(
     """
     # filter atom_df to include only the chains of interest
     atom_df = filter_dataframe(
-        atom_df, "chain_id", [chain_label_1, chain_label_2], boolean=True
+        dataframe=atom_df,
+        by_column="chain_id",
+        list_of_values=[chain_label_1, chain_label_2],
+        boolean=True
     )
 
+    # --------------------
+    # contact by type
+    # --------------------
     # find hydrogen bonds
-    hbonds: Dict[str, List[Tuple[str]]] = get_hydrogen_bonds(atom_df)
-    print_msg(f"Hydrogen bonds: {hbonds}", "debug")
-    # prepare annotation dict
-    interaction_annotation_dict = {}
-    if hbonds["inter-chain-res-pairs"]:
-        # residue pairs with hydrogen bonds
-        interaction_annotation_dict = {
-            k: ["HBond"] for k in hbonds["inter-chain-res-pairs"]
-        }
+    with timing_context(f"get_hydrogen_bonds chains {chain_label_1} and {chain_label_2}"):
+        hbonds: Dict[str, List[Tuple[str]]] = get_hydrogen_bonds(atom_df=atom_df, chain_label_1=chain_label_1, chain_label_2=chain_label_2)
 
-    # find contacts
-    atom_contacts: pd.DataFrame = calculate_min_residue_distances(
-        atom_df, chain_label_1, chain_label_2, thr=thr
+    # find polar contacts
+    with timing_context(f"get_polar_contacts chains {chain_label_1} and {chain_label_2}"):
+        polar_contacts: Dict[str, List[Tuple[str]]] = get_polar_contacts(atom_df=atom_df, chain_label_1=chain_label_1, chain_label_2=chain_label_2)
+
+    # --------------------
+    # Annotation dict
+    # --------------------
+    att_dict = {}
+    if hbonds["inter-chain-res-pairs"]:
+        # hydrogen bonds
+        for k in hbonds["inter-chain-res-pairs"]:
+            att_dict[k] = att_dict.get(k, []) + ["HBond"]
+    if polar_contacts["inter-chain-res-pairs"]:
+        # polar contacts
+        for k in polar_contacts["inter-chain-res-pairs"]:
+            att_dict[k] = att_dict.get(k, []) + ["Polar"]
+
+    # --------------------
+    # Annotate contacts
+    # --------------------
+    min_dist_res_contacts: pd.DataFrame = calculate_min_residue_distances(
+        atom_df=atom_df,
+        chain_label_1=chain_label_1,
+        chain_label_2=chain_label_2,
+        thr=thr,
     )
 
     return {
-        "contacts": atom_contacts,
-        "interaction_annotation_dict": interaction_annotation_dict,
+        "contacts": min_dist_res_contacts,
+        "interaction_annotation_dict": att_dict,
         "hbond_atom_pairs": hbonds["inter-chain-atom-pairs"],
+        "polar_atom_pairs": polar_contacts["inter-chain-atom-pairs"],
     }
 
 
@@ -921,10 +1173,6 @@ def create_txt_content(
     step = 10 * math.ceil(step / 10)
     content = "Interface residues:\n"
     for chain_label in chain_labels_1 + chain_labels_2:
-        print_msg(
-            f"Interface residues for chain {chain_label}: {interface_residues_by_chain[chain_label]}",
-            "debug",
-        )
         # e.g. chain D
         content += f"Chain: {chain_label}\n"
         # write its sequence read from atom_df
@@ -1004,8 +1252,6 @@ def create_txt_content(
 # ----------------------------------------
 # PyMOL
 # ----------------------------------------
-# TODO 1: clean this function
-# TODO 2: add function to select ionic interactions
 def select_interface(
     selection: str = "all",
     chain_labels_1: Optional[Union[str, List[str]]] = None,
@@ -1037,11 +1283,17 @@ def select_interface(
     Returns:
         None
     """
-    # correct types
+    # ----------------------------------------
+    # process args
+    # ----------------------------------------
     pdb_file = Path(pdb_file) if pdb_file else None
     chain_labels_1 = list(chain_labels_1) if chain_labels_1 else None
     chain_labels_2 = list(chain_labels_2) if chain_labels_2 else None
     dist_cutoff = float(dist_cutoff) if dist_cutoff else 4.5
+
+    # ----------------------------------------
+    # Load structure as df
+    # ----------------------------------------
     # save a temporary pdb file if pdb_file is None
     if not pdb_file:
         with tempfile.TemporaryDirectory() as temp_dir:
@@ -1055,6 +1307,27 @@ def select_interface(
     else:
         atom_df = parse_pdb_file_as_atom_df(pdb_file)
 
+    """atom_df row example
+      record_name  atom_number blank_1 atom_name alt_loc residue_name blank_2
+    0        ATOM            1                 N                  MET
+    1        ATOM            2                CA                  MET
+
+    chain_id  residue_number insertion blank_3  x_coord  y_coord  z_coord
+           A               1                    -11.193   46.130  -32.851
+           A               1                     -9.983   45.956  -33.682
+
+    occupancy  b_factor blank_4 segment_id element_symbol  charge  line_idx
+          1.0     27.40                                 N     NaN         0
+          1.0     32.01                                 C     NaN         1
+
+        node_id residue_id
+     A:MET:1::N   A:MET:1:
+    A:MET:1::CA   A:MET:1:
+    """
+
+    # ----------------------------------------
+    # Create chain pairs
+    # ----------------------------------------
     # all chain labels
     chain_labels = atom_df["chain_id"].unique().tolist()
     print_msg(
@@ -1070,9 +1343,11 @@ def select_interface(
     chain_pairs = create_chain_pairs(chain_labels_1, chain_labels_2)
     print_msg(f"Chain pairs: {chain_pairs}", "info")
 
+    # ----------------------------------------
+    # Find contacts
+    # ----------------------------------------
     # iterate over all chain pairs
     final_df_residue = pd.DataFrame()
-    final_df_atom = pd.DataFrame()
     for chain_label_1, chain_label_2 in chain_pairs:
         with timing_context(
             f"Find contacts between {chain_label_1} and {chain_label_2}"
@@ -1083,35 +1358,31 @@ def select_interface(
                 chain_label_2=chain_label_2,
                 thr=dist_cutoff,
             )
-            print_msg(f"Results:\n{results}", "debug")
             # residue pairs with hydrogen bonds to csv
             contacts_csv = to_csv(
                 contacts_df=results["contacts"],
                 interaction_annotation_dict=results["interaction_annotation_dict"],
             )
-            print_msg(f"Contacts CSV:\n{contacts_csv}", "debug")
-            # atom pairs with hydrogen bonds to csv
-            data = {}
-            data["atom_1"] = [x[0] for x in results["hbond_atom_pairs"]]
-            data["atom_2"] = [x[1] for x in results["hbond_atom_pairs"]]
-            data["chain_1"] = [x.split(":")[0] for x in data["atom_1"]]
-            data["chain_2"] = [x.split(":")[0] for x in data["atom_2"]]
-            final_df_atom = pd.concat([final_df_atom, pd.DataFrame(data)])
-            # add to the final dataframe
             final_df_residue = pd.concat([final_df_residue, contacts_csv])
 
-    print_msg(f"Final dataframe: {final_df_residue}", "debug")
-
-    # [x] TODO: Create selection in pymol by chain
+    # ----------------------------------------
+    # Create selections in PyMOL
+    # ----------------------------------------
     # e.g. selName = f"{c1}{c2}-{c1}" means select interface residues between chain c1 and c2 in chain c1
-    for c1, c2 in chain_pairs:
+    for chain_1, chain_2 in chain_pairs:
         # query interface residues between D and E from final_df
-        sub_df_residue = final_df_residue.query(f"chain_1=='{c1}' & chain_2=='{c2}'")
-        sub_df_atom = final_df_atom.query(f"chain_1=='{c1}' & chain_2=='{c2}'")
+        sub_df_residue = final_df_residue.query(f"chain_1=='{chain_1}' & chain_2=='{chain_2}'")
 
+        # --------------------
+        # Select interface
+        # --------------------
         def _create_selection_for_one_chain(
             c: str, chain1: str, chain2: str, col_name: str
         ):
+            """
+            Create selection for one chain between chain1 and chain2.
+            e.g. interface-DG-D: select interface residues between D and G in chain D
+            """
             assert col_name in ["residue_1", "residue_2"]
             # create selection string
             sel_name = f"interface-{chain1}{chain2}-{c}"
@@ -1127,71 +1398,130 @@ def select_interface(
             return sel_name, sel_str
 
         sel_name_1, sel_str_1 = _create_selection_for_one_chain(
-            c=c1, chain1=c1, chain2=c2, col_name="residue_1"
+            c=chain_1, chain1=chain_1, chain2=chain_2, col_name="residue_1"
         )
         if sel_name_1 and sel_str_1:
             cmd.delete(sel_name_1)
             cmd.select(sel_name_1, sel_str_1)
         else:
-            print_msg(f"No interface residues found between {c1} and {c2}", "info")
+            print_msg(f"No interface residues found between {chain_1} and {chain_2}", "info")
 
         sel_name_2, sel_str_2 = _create_selection_for_one_chain(
-            c=c2, chain1=c1, chain2=c2, col_name="residue_2"
+            c=chain_2, chain1=chain_1, chain2=chain_2, col_name="residue_2"
         )
         if sel_name_2 and sel_str_2:
-            cmd.delete(sel_name_2)
-            cmd.select(sel_name_2, sel_str_2)
+            cmd.delete(name=sel_name_2)
+            cmd.select(name=sel_name_2, selection=sel_str_2)
         else:
-            print_msg(f"No interface residues found between {c1} and {c2}", "info")
+            print_msg(f"No interface residues found between {chain_1} and {chain_2}", "info")
 
-        sel_name_1_2 = f"interface-{c1}{c2}"
+        sel_name_1_2 = f"interface-{chain_1}{chain_2}"
         if sel_name_1 and sel_name_2:
-            cmd.delete(sel_name_1_2)
-            cmd.select(sel_name_1_2, f"{sel_name_1} or {sel_name_2}")
+            cmd.delete(name=sel_name_1_2)
+            cmd.select(name=sel_name_1_2, selection=f"{sel_name_1} or {sel_name_2}")
+
+        # --------------------
+        # HBond res pairs
+        # --------------------
+        # extract as a function
+        def create_selection_str(parent_df: pd.DataFrame, interaction_type: str, obj_name: str, prefix: str) -> List[str]:
+            """ Create selections for a given interaction type e.g. 'HBond', 'Polar'. """
+            sub_df = parent_df[parent_df.interaction.str.contains(interaction_type, na=False)]  # get rows with interaction_type e.g. HBond, Polar
+            selections = []  # output list of selections
+            if not sub_df.empty:
+                for _, row in sub_df.iterrows():
+                    r1, r2 = row["residue_1"], row["residue_2"]
+                    c1, _, ri1, ins1 = r1.split(":")
+                    c2, _, ri2, ins2 = r2.split(":")
+                    name_i = f"{prefix}-{interaction_type}-{c1}.{ri1}{ins1}-{c2}.{ri2}{ins2}"
+                    sel_i = f"{obj_name} and ((c. {c1} and i. {ri1}{ins1}) or (c. {c2} and i. {ri2}{ins2}))"
+                    cmd.select(name=name_i, selection=sel_i)
+                    selections.append(name_i)
+            return selections
 
         # HBond: create a group of residue pairs if sub_df_residue is not empty
-        sel_name_1_2_hbond = f"{sel_name_1_2}-HBond"
-        sub_df_hbond = sub_df_residue.query("interaction == 'HBond'")
-        sels = []
-        if not sub_df_hbond.empty:
-            sel_str_hbond = []
-            # iterate over the rows of sub_df_hbond
-            n = 1
-            for _, row in sub_df_hbond.iterrows():
-                # get the residue names and numbers
-                res1, res2 = row["residue_1"], row["residue_2"]
-                # unpack the residue names and numbers
-                chain1, _, resi1, ins1 = res1.split(":")
-                chain2, _, resi2, ins2 = res2.split(":")
-                # residue pair selection string
-                sel_name_i = f"{sel_name_1_2}-HB{n}"
-                sel_str_i = f"{selection} and ((c. {chain1} and i. {resi1}{ins1}) or (c. {chain2} and i. {resi2}{ins2}))"
-                cmd.select(sel_name_i, sel_str_i)
-                sels.append(sel_name_i)
-                n += 1
-        # delete the group if it exists
-        cmd.delete(sel_name_1_2_hbond)
-        # group all selections
-        cmd.group(sel_name_1_2_hbond, " ".join(sels))
+        selections = create_selection_str(
+            parent_df=sub_df_residue,
+            interaction_type="HBond",
+            obj_name=selection,
+            prefix=sel_name_1_2
+        )
+        if selections:
+            n = f"{sel_name_1_2}-HBond"
+            cmd.delete(name=n)
+            cmd.group(name=n, members=" ".join(selections))
 
-        # measure distances
-        sel_dist = []
-        for _, row in sub_df_atom.iterrows():
-            atom_1, atom_2 = row["atom_1"], row["atom_2"]
-            c1, _, r1, i1, a1 = atom_1.split(":")
-            c2, _, r2, i2, a2 = atom_2.split(":")
-            l = f"{c1}_{r1}{i1}_{a1}-{c2}_{r2}{i2}_{a2}"
-            cmd.distance(
-                name=l,
-                selection1=f"{selection} and (c. {c1} and i. {r1}{i1} and n. {a1})",
-                selection2=f"{selection} and (c. {c2} and i. {r2}{i2} and n. {a2})",
+        # --------------------
+        # HBond distance
+        # --------------------
+        def create_dist_selection_str(atom_pair_list: List[Tuple[str, str]], obj_name: str, prefix: str=None) -> List[str]:
+            """ Create distance selections for given atom pairs type e.g. 'hbond_atom_pairs', 'polar_atom_pairs'."""
+            dist_sel = []
+            for (n1, n2) in atom_pair_list:
+                c1, _, ri1, ins1, a1 = n1.split(":")
+                c2, _, ri2, ins2, a2 = n2.split(":")
+                l = f"{c1}_{ri1}{ins1}_{a1}-{c2}_{ri2}{ins2}_{a2}"
+                l = f"{prefix}-{l}" if prefix else l
+                l = l.replace("'", "_")  # ' is not allowed in pymol selection name
+                cmd.distance(
+                    name=l,
+                    selection1=f"{obj_name} and (c. {c1} and i. {ri1}{ins1} and n. {a1})",
+                    selection2=f"{obj_name} and (c. {c2} and i. {ri2}{ins2} and n. {a2})",
+                )
+                dist_sel.append(l)
+            return dist_sel
+
+        if results["hbond_atom_pairs"]:
+            dist_sel = create_dist_selection_str(
+                atom_pair_list=results["hbond_atom_pairs"],
+                obj_name=selection,
+                prefix=f"{sel_name_1_2}-HBond"
             )
-            sel_dist.append(l)
-        # group all distances
-        cmd.delete(f"{sel_name_1_2}-hbond-distance")
-        cmd.group(f"{sel_name_1_2}-hbond-distance", " ".join(sel_dist))
+            # pymol selection
+            cmd.delete(f"{sel_name_1_2}-HBond-distance")
+            cmd.group(f"{sel_name_1_2}-HBond-distance", " ".join(dist_sel))
+        else:
+            print_msg("No hydrogen bond atom pairs found between the chains", "info")
+        # --------------------
+        # Polar res pairs
+        # --------------------
+        # Polar contacts: create a group of residue pairs if sub_df_residue is not empty
+        selections = create_selection_str(
+            parent_df=sub_df_residue,
+            interaction_type="Polar",
+            obj_name=selection,
+            prefix=sel_name_1_2
+        )
+        if selections:
+            name = f"{sel_name_1_2}-Polar"
+            cmd.delete(name=name)
+            cmd.group(name=name, members=" ".join(selections))
 
+        # --------------------
+        # Polar distance
+        # --------------------
+        if results["polar_atom_pairs"]:
+            dist_sel = create_dist_selection_str(
+                atom_pair_list=results["polar_atom_pairs"],
+                obj_name=selection,
+                prefix=f"{sel_name_1_2}-Polar"
+            )
+            # group all distances
+            n = f"{sel_name_1_2}-Polar-distance"
+            cmd.delete(n)
+            cmd.group(n, " ".join(dist_sel))
+
+    # --------------------
+    # Extra steps
+    # --------------------
+    # show interface-* as sticks
+    cmd.show("sticks", f"interface-*")
+    # set background to white
+    cmd.bg_color("white")
+
+    # --------------------
     # save output
+    # --------------------
     if save_results:
         # csv
         out_fp = Path(f"{pdb_file.stem}_contacts.csv")
@@ -1225,150 +1555,3 @@ def select_interface(
 
 
 cmd.extend("cl_select_interface", select_interface)
-
-
-# ----------------------------------------
-# Deprecated
-# ----------------------------------------
-def main(args):
-    # create output directory
-    args.output_dir.mkdir(exist_ok=True, parents=True)
-
-    # process input structure
-    # if mmcif, convert to pdb
-    if args.struct_fp.suffix == ".cif":
-        with timing_context("Convert mmCIF to PDB"):
-            pdb_fp = args.output_dir / f"{args.struct_fp.stem}.pdb"
-            convert_mmcif_to_pdb(args.struct_fp, pdb_fp)
-            args.struct_fp = pdb_fp
-
-    # parse the structure file as a DataFrame
-    atom_df: pd.DataFrame = parse_pdb_file_as_atom_df(args.struct_fp)
-
-    # all chain labels
-    chain_labels = atom_df["chain_id"].unique().tolist()
-    print_msg(
-        f"All chain labels in the structure: {chain_labels}({type(chain_labels)})",
-        "debug",
-    )
-
-    # if neither receptor_chain_labels nor ligand_chain_labels are provided, do it pairwise
-    receptor_chain_labels = args.receptor_chain_labels
-    ligand_chain_labels = args.ligand_chain_labels
-    if not receptor_chain_labels and not ligand_chain_labels:
-        print_msg("No chain labels provided. Use all possible chain pairs.", "info")
-        # set the receptor and ligand chain labels to all possible combinations
-        receptor_chain_labels = chain_labels
-        ligand_chain_labels = chain_labels
-        print_msg(f"Receptor chain labels: {receptor_chain_labels}", "info")
-        print_msg(f"Ligand chain labels: {ligand_chain_labels}", "info")
-
-    with timing_context("Create chain pairs"):
-        chain_pairs: List[Tuple[str, str]] = create_chain_pairs(
-            receptor_chain_labels, ligand_chain_labels
-        )
-    print_msg(f"Chain pairs: {chain_pairs}", "info")
-
-    # iterate over all chain pairs
-    final_df = pd.DataFrame()
-    for chain_label_1, chain_label_2 in chain_pairs:
-        with timing_context(
-            f"Find contacts between {chain_label_1} and {chain_label_2}"
-        ):
-            resluts = find_contacts_between_two_chains(
-                atom_df=atom_df,
-                chain_label_1=chain_label_1,
-                chain_label_2=chain_label_2,
-            )
-            contacts_csv = to_csv(
-                contacts_df=resluts["contacts"],
-                interaction_annotation_dict=resluts["interaction_annotation_dict"],
-            )
-            # add to the final dataframe
-            final_df = pd.concat([final_df, contacts_csv])
-
-    # save to csv
-    out_fp = args.output_dir / f"{args.struct_fp.stem}_contacts.csv"
-    with timing_context(f"Save results to {out_fp}"):
-        final_df.to_csv(out_fp, index=False)
-
-    # ----------------------------------------
-    # create a txt file to record all interface
-    # residues for each chain
-    # ----------------------------------------
-    out_fp = args.output_dir / f"{args.struct_fp.stem}_interface_residues.txt"
-    # interface residues
-    interface_residues = (
-        final_df["residue_1"].to_list() + (final_df["residue_2"]).to_list()
-    )
-    # all chains
-    input_chain_labels = set(receptor_chain_labels + ligand_chain_labels)
-    print_msg(f"Input chain labels: {input_chain_labels}", "debug")
-    # get interface residues by chain
-    interface_residues_by_chain = {
-        c: [r for r in interface_residues if r.startswith(c)]
-        for c in input_chain_labels
-    }
-    print_msg(f"Interface residues by chain: {interface_residues_by_chain}", "debug")
-    # crate file content
-    content = "Interface residues:\n"
-    for chain_label in input_chain_labels:
-        print_msg(
-            f"Interface residues for chain {chain_label}: {interface_residues_by_chain[chain_label]}",
-            "debug",
-        )
-        # e.g. chain D
-        content += f"Chain: {chain_label}\n"
-        # write its sequence read from atom_df
-        three_letter_list = (
-            atom_df.query(f'chain_id == "{chain_label}"')
-            .drop_duplicates("residue_id")
-            .residue_name.to_list()
-        )
-        if set(three_letter_list) < {"A", "C", "U", "G", "T"}:
-            # RNA
-            if "U" in three_letter_list:
-                chain_type = "RNA"
-            elif "T" in three_letter_list:
-                chain_type = "DNA"
-            else:
-                chain_type = "Nucleic"
-        else:
-            chain_type = "Protein"
-        content += f"Type: {chain_type}\n"
-
-        # Add sequence
-        if chain_type == "Protein":
-            aa1_list = [three_to_one(aa3) for aa3 in three_letter_list]
-            # seq
-            seq = "".join(aa1_list)
-        else:
-            seq = "".join(three_letter_list)
-
-        # Add interface mask
-        # create a binary mask for interface residues
-        chain_df = (
-            atom_df.query(f'chain_id == "{chain_label}"')
-            .drop_duplicates("residue_id")
-            .reset_index(drop=True)
-        )
-        # got indices of interface residues
-        interface_res_indices = chain_df.query(
-            "residue_id in @interface_residues_by_chain[@chain_label]"
-        ).index
-        # create a binary mask
-        mask = np.zeros(len(chain_df), dtype=bool)
-        mask[interface_res_indices] = True
-        # convert Flase to '-' and True to '*'
-        mask_str = "".join(["*" if m else "-" for m in mask])
-
-        # add to the content wrap 100 characters a line
-        # add a line above to show 10, 20, ... 100 using 1 - 9, 0
-        for i in range(0, len(seq), 100):
-            content += f"Sequence : {i+1:>4} {seq[i:i+100]}\n"
-            content += f"Interface: {i+1:>4} {mask_str[i:i+100]}\n"
-            content += "\n"
-        # add separator
-        content += "\n\n"
-    with open(out_fp, "w") as f:
-        f.write(content)
